@@ -132,6 +132,8 @@ let rankFilter = 'all';
 let showBracket = false;
 let mapInstance = null;
 let mapSelectedId = null;
+let showAddDish = false;
+let addDishCat = 'mains';
 
 function render(){
   const main = document.getElementById('main');
@@ -150,8 +152,11 @@ function renderHome(){
       <p class="eyebrow">SEASONAL QUALIFIER</p>
       <h2>CHOOSE YOUR<br/>BATTLEGROUND.</h2>
       <p>Select a category to enter the bracket. Only the most appetizing contenders advance to the Grand Finale.</p>
-      <button class="cta" data-go="battle">View Brackets</button>
-    </section>
+      <div class="hero-actions">
+        <button class="cta" data-go="battle">View Brackets</button>
+        <button class="cta ghost" data-add-dish>+ Add Dish</button>
+      </div>
+    </section>${showAddDish ? renderAddDishSheet() : ''}
     ${Object.keys(SEED).map(cat => `
       <article class="cat-card" data-cat="${cat}">
         <div class="cat-img" style="background-image:url('${SEED[cat][0].img}')">
@@ -244,6 +249,39 @@ function battleCard(m, side, outline){
         <button class="vote-btn ${outline?'outline':''}" data-vote="${m.id}">VOTE</button>
       </div>
     </article>
+  `;
+}
+
+function renderAddDishSheet(){
+  return `
+    <div class="bracket-overlay" data-close-add>
+      <div class="bracket-sheet" onclick="event.stopPropagation()">
+        <div class="bracket-head">
+          <h3>Add a Dish</h3>
+          <button class="icon-btn" data-close-add>✕</button>
+        </div>
+        <form id="addDishForm" class="add-form">
+          <label>Dish name<input name="name" required placeholder="e.g. Truffle Risotto"/></label>
+          <label>Restaurant<input name="restaurant" required placeholder="e.g. Locanda Locatelli"/></label>
+          <label>City<input name="city" required placeholder="e.g. London"/></label>
+          <label>Category
+            <select name="category">
+              <option value="mains" ${addDishCat==='mains'?'selected':''}>Main Meals</option>
+              <option value="starters" ${addDishCat==='starters'?'selected':''}>Starters</option>
+              <option value="desserts" ${addDishCat==='desserts'?'selected':''}>Desserts</option>
+            </select>
+          </label>
+          <label>Image URL<input name="img" required placeholder="https://..."/></label>
+          <div class="form-row">
+            <label>Rating<input name="rating" type="number" min="1" max="5" step="0.1" value="4.5"/></label>
+            <label>Lat<input name="lat" type="number" step="any" value="51.5074"/></label>
+            <label>Lng<input name="lng" type="number" step="any" value="-0.1278"/></label>
+          </div>
+          <button type="submit" class="vote-btn">SUBMIT TO ARENA</button>
+          <p class="form-hint">Tip: get coords by right-clicking on Google Maps.</p>
+        </form>
+      </div>
+    </div>
   `;
 }
 
@@ -429,6 +467,38 @@ function wireView(){
     mapInstance.flyToBounds(all.map(m=>[m.lat,m.lng]), { padding:[40,40], duration:.6 });
     mapSelectedId = null;
     setTimeout(render, 600);
+  };
+  document.querySelectorAll('[data-add-dish]').forEach(el => el.onclick = () => { showAddDish = true; render(); });
+  document.querySelectorAll('[data-close-add]').forEach(el => el.onclick = () => { showAddDish = false; render(); });
+  const form = document.getElementById('addDishForm');
+  if (form) form.onsubmit = async e => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const dish = {
+      id: 'u_' + Math.random().toString(36).slice(2,9),
+      name: fd.get('name'),
+      restaurant: fd.get('restaurant'),
+      city: fd.get('city'),
+      category: fd.get('category'),
+      rating: parseFloat(fd.get('rating')),
+      lat: parseFloat(fd.get('lat')),
+      lng: parseFloat(fd.get('lng')),
+      img: fd.get('img'),
+    };
+    addDishCat = dish.category;
+    try {
+      const r = await SB.addDish(dish);
+      if (!r.ok) throw new Error(await r.text());
+      // Add locally + refresh bracket of this category
+      SEED[dish.category].push(dish);
+      state.bracket[dish.category] = initBracket(dish.category);
+      save();
+      showAddDish = false;
+      state.currentCat = dish.category;
+      setView('battle');
+    } catch(err){
+      alert('Failed to add dish: ' + err.message);
+    }
   };
   const bb = document.querySelector('[data-bracket]');
   if (bb) bb.onclick = () => { showBracket = true; render(); };
