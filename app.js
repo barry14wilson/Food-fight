@@ -1,5 +1,5 @@
-// The Arena — Food Fight tournament logic (bracket edition)
-const STORAGE_KEY = 'foodfight.v3';
+// The Arena — Food Fight tournament logic (bracket edition + Supabase)
+const STORAGE_KEY = 'foodfight.v4';
 const CAT_LABEL = { mains:'Main Meals', starters:'Starters', desserts:'Desserts' };
 const CAT_TAGLINE = {
   starters:'The opening gambit. From crispy tempura to delicate carpaccio.',
@@ -8,7 +8,8 @@ const CAT_TAGLINE = {
 };
 const ROUND_NAMES = ['Round of 16','Quarter Finals','Semi Finals','Final','Champion'];
 
-const state = load() || init();
+let state = load() || init();
+let globalPoints = {}; // from Supabase
 
 function init(){
   const s = { points:{}, votes:0, currentCat:'mains', bracket:{} };
@@ -18,6 +19,29 @@ function init(){
   }
   return s;
 }
+
+async function bootSupabase(){
+  try {
+    const [dishes, points] = await Promise.all([SB.fetchDishes(), SB.fetchPoints()]);
+    if (dishes && dishes.length){
+      const cats = { mains:[], starters:[], desserts:[] };
+      dishes.forEach(d => { if (cats[d.category]) cats[d.category].push(d); });
+      // Only swap in if we got data for all categories
+      if (cats.mains.length && cats.starters.length && cats.desserts.length){
+        window.SEED = cats;
+      }
+    }
+    if (points) points.forEach(p => globalPoints[p.id] = p.points);
+    // Re-init brackets if seed changed and storage was empty
+    if (!localStorage.getItem(STORAGE_KEY)){
+      state = init(); save();
+    }
+    render();
+  } catch(e){
+    console.warn('Supabase boot failed, using local seed', e);
+  }
+}
+function pointsFor(id){ return (globalPoints[id] || 0) + (state.points[id] || 0); }
 function nextPow2(n){ let p=1; while(p<n) p*=2; return p; }
 function initBracket(cat){
   const ids = shuffle(SEED[cat].map(m => m.id));
@@ -60,13 +84,17 @@ function castVote(cat, winnerId){
   const r = b.rounds[b.current];
   const i = b.matchIdx * 2;
   const loserId = r[i] === winnerId ? r[i+1] : r[i];
-  state.points[winnerId] = (state.points[winnerId]||0) + 250;
-  state.points[loserId]  = (state.points[loserId]||0)  + 25;
+  // Optimistic global update
+  globalPoints[winnerId] = (globalPoints[winnerId]||0) + 250;
+  globalPoints[loserId]  = (globalPoints[loserId]||0)  + 25;
   state.votes++;
   b.rounds[b.current+1][b.matchIdx] = winnerId;
   b.matchIdx++;
   autoAdvance(b);
   save();
+  // Write to Supabase (fire & forget)
+  if (window.SB) SB.castVote({ winner_id: winnerId, loser_id: loserId, category: cat })
+    .catch(e => console.warn('vote sync failed', e));
 }
 
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -74,7 +102,7 @@ function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } c
 function shuffle(a){ for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
 function findMeal(id){ if (!id) return null; for (const cat of Object.keys(SEED)) { const m = SEED[cat].find(x=>x.id===id); if (m) return {...m, category:cat}; } }
 function rankOf(id, cat){
-  const sorted = SEED[cat].map(m=>({id:m.id, p:state.points[m.id]||0})).sort((a,b)=>b.p-a.p);
+  const sorted = SEED[cat].map(m=>({id:m.id, p:pointsFor(m.id)})).sort((a,b)=>b.p-a.p);
   return sorted.findIndex(x=>x.id===id) + 1;
 }
 function roundLabel(b){
@@ -171,7 +199,7 @@ function renderBattle(){
         <div class="battle-body">
           <div class="battle-row">
             <h3>${champ.name}</h3>
-            <div class="points"><div class="n">${state.points[champ.id]}</div><div class="l">POINTS</div></div>
+            <div class="points"><div class="n">${pointsFor(champ.id)}</div><div class="l">POINTS</div></div>
           </div>
           <p class="location">${champ.restaurant} · ${champ.city}</p>
           <button class="vote-btn" data-reset>RESET BRACKET</button>
@@ -210,7 +238,7 @@ function battleCard(m, side, outline){
       <div class="battle-body">
         <div class="battle-row">
           <h3>${m.name}</h3>
-          <div class="points"><div class="n">${(state.points[m.id]||0).toLocaleString()}</div><div class="l">POINTS</div></div>
+          <div class="points"><div class="n">${(pointsFor(m.id)).toLocaleString()}</div><div class="l">POINTS</div></div>
         </div>
         <p class="location">${m.restaurant} · ${m.city}</p>
         <button class="vote-btn ${outline?'outline':''}" data-vote="${m.id}">VOTE</button>
@@ -250,7 +278,7 @@ function renderBracketOverlay(cat){
 function renderRank(){
   const allMeals = Object.entries(SEED).flatMap(([cat,arr])=>arr.map(m=>({...m,category:cat})));
   const filtered = rankFilter==='all' ? allMeals : allMeals.filter(m=>m.category===rankFilter);
-  const ranked = filtered.map(m=>({...m,pts:state.points[m.id]||0})).sort((a,b)=>b.pts-a.pts);
+  const ranked = filtered.map(m=>({...m,pts:pointsFor(m.id)})).sort((a,b)=>b.pts-a.pts);
   const [first,second,third,...rest] = ranked;
   return `
     <div class="rank-head">
@@ -301,9 +329,9 @@ function podium(m, ord, label, cls){
 }
 
 function renderMap(){
-  const all = Object.values(SEED).flat().map(m=>({...m,pts:state.points[m.id]||0})).sort((a,b)=>b.pts-a.pts);
+  const all = Object.values(SEED).flat().map(m=>({...m,pts:pointsFor(m.id)})).sort((a,b)=>b.pts-a.pts);
   const sel = (mapSelectedId && findMeal(mapSelectedId)) || all[0];
-  const selPts = state.points[sel.id] || 0;
+  const selPts = pointsFor(sel.id);
   return `
     <div class="map-wrap">
       <div id="leaflet-map"></div>
@@ -338,7 +366,7 @@ function mountMap(){
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     maxZoom: 19,
   }).addTo(mapInstance);
-  const all = Object.values(SEED).flat().map(m => ({...m, pts: state.points[m.id]||0}));
+  const all = Object.values(SEED).flat().map(m => ({...m, pts: pointsFor(m.id)}));
   const ranks = [...all].sort((a,b)=>b.pts-a.pts);
   const topId = ranks[0].id;
   const bounds = [];
@@ -415,3 +443,4 @@ function setView(v){
 document.querySelectorAll('.nav-btn').forEach(b => b.onclick = () => setView(b.dataset.view));
 
 render();
+bootSupabase();
