@@ -2,55 +2,30 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Food Fight — Meal Showdown</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>The Arena — Food Fight</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Display:wght@500;700&family=Google+Sans+Text:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo">🍽️</span>
-      <h1>Food Fight</h1>
-    </div>
-    <nav class="tabs" id="tabs">
-      <button class="tab active" data-cat="mains">Main meals</button>
-      <button class="tab" data-cat="starters">Starters</button>
-      <button class="tab" data-cat="desserts">Desserts</button>
-      <button class="tab ghost" data-view="leaderboard">Leaderboard</button>
+  <div class="phone">
+    <header class="topbar">
+      <div class="avatar">🧑‍🍳</div>
+      <h1 class="brand">THE ARENA</h1>
+      <button class="icon-btn" aria-label="Search">🔍</button>
+    </header>
+
+    <main id="main"></main>
+
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-view="home"><span class="i">🏠</span><span>HOME</span></button>
+      <button class="nav-btn" data-view="battle"><span class="i">⚡</span><span>BATTLE</span></button>
+      <button class="nav-btn" data-view="rank"><span class="i">📊</span><span>RANK</span></button>
+      <button class="nav-btn" data-view="map"><span class="i">🗺️</span><span>MAP</span></button>
     </nav>
-    <button class="connect" id="connectBtn">Connect Google Maps</button>
-  </header>
-
-  <main id="main">
-    <section id="arena" class="arena">
-      <h2 class="round-title" id="roundTitle">Round 1 · Main meals</h2>
-      <p class="round-sub">Pick the dish that wins. The champion stays on and faces the next challenger.</p>
-
-      <div class="cards">
-        <article class="card" id="cardA"></article>
-        <div class="vs">VS</div>
-        <article class="card" id="cardB"></article>
-      </div>
-
-      <div class="actions">
-        <button class="ghost" id="skipBtn">Skip matchup</button>
-        <button class="ghost" id="resetBtn">Reset bracket</button>
-      </div>
-    </section>
-
-    <section id="leaderboard" class="leaderboard hidden">
-      <h2>Leaderboard</h2>
-      <div class="lb-tabs">
-        <button class="lb-tab active" data-lb="mains">Mains</button>
-        <button class="lb-tab" data-lb="starters">Starters</button>
-        <button class="lb-tab" data-lb="desserts">Desserts</button>
-      </div>
-      <ol id="lbList" class="lb-list"></ol>
-    </section>
-  </main>
+  </div>
 
   <script src="data.js"></script>
   <script src="app.js"></script>
