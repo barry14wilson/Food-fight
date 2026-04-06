@@ -1,37 +1,107 @@
-// The Arena — Food Fight tournament logic
-const STORAGE_KEY = 'foodfight.v2';
+// The Arena — Food Fight tournament logic (bracket edition)
+const STORAGE_KEY = 'foodfight.v3';
 const CAT_LABEL = { mains:'Main Meals', starters:'Starters', desserts:'Desserts' };
 const CAT_TAGLINE = {
   starters:'The opening gambit. From crispy tempura to delicate carpaccio.',
   mains:'The heavy hitters. Masterpieces of protein and culinary technique.',
   desserts:'The final blow. Decadent sweets and architectural confections.'
 };
+const ROUND_NAMES = ['Round of 16','Quarter Finals','Semi Finals','Final','Champion'];
 
 const state = load() || init();
 
 function init(){
-  const s = { points:{}, votes:0, currentCat:'mains', queues:{}, champion:{}, round:{}, total:{} };
+  const s = { points:{}, votes:0, currentCat:'mains', bracket:{} };
   for (const cat of Object.keys(SEED)){
     SEED[cat].forEach(m => s.points[m.id] = 0);
-    s.queues[cat] = shuffle(SEED[cat].map(m => m.id));
-    s.champion[cat] = s.queues[cat].shift();
-    s.round[cat] = 1;
-    s.total[cat] = SEED[cat].length - 1;
+    s.bracket[cat] = initBracket(cat);
   }
   return s;
 }
+function nextPow2(n){ let p=1; while(p<n) p*=2; return p; }
+function initBracket(cat){
+  const ids = shuffle(SEED[cat].map(m => m.id));
+  const target = nextPow2(ids.length);
+  while (ids.length < target) ids.push(null); // null = bye
+  const rounds = [ids];
+  let n = target / 2;
+  while (n >= 1) { rounds.push(new Array(n).fill(null)); n = Math.floor(n/2); }
+  const b = { rounds, current:0, matchIdx:0, champion:null };
+  autoAdvance(b);
+  return b;
+}
+function autoAdvance(b){
+  while (!b.champion){
+    const r = b.rounds[b.current];
+    if (b.matchIdx * 2 >= r.length){
+      b.current++;
+      b.matchIdx = 0;
+      if (b.rounds[b.current] && b.rounds[b.current].length === 1 && b.rounds[b.current][0]){
+        b.champion = b.rounds[b.current][0];
+        return;
+      }
+      continue;
+    }
+    const i = b.matchIdx * 2;
+    const a = r[i], c = r[i+1];
+    if (a == null && c == null){
+      b.rounds[b.current+1][b.matchIdx] = null; b.matchIdx++;
+    } else if (a == null){
+      b.rounds[b.current+1][b.matchIdx] = c; b.matchIdx++;
+    } else if (c == null){
+      b.rounds[b.current+1][b.matchIdx] = a; b.matchIdx++;
+    } else {
+      return; // real match awaits a vote
+    }
+  }
+}
+function castVote(cat, winnerId){
+  const b = state.bracket[cat];
+  const r = b.rounds[b.current];
+  const i = b.matchIdx * 2;
+  const loserId = r[i] === winnerId ? r[i+1] : r[i];
+  state.points[winnerId] = (state.points[winnerId]||0) + 250;
+  state.points[loserId]  = (state.points[loserId]||0)  + 25;
+  state.votes++;
+  b.rounds[b.current+1][b.matchIdx] = winnerId;
+  b.matchIdx++;
+  autoAdvance(b);
+  save();
+}
+
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 function load(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; } }
 function shuffle(a){ for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
-function findMeal(id){ for (const cat of Object.keys(SEED)) { const m = SEED[cat].find(x=>x.id===id); if (m) return {...m, category:cat}; } }
+function findMeal(id){ if (!id) return null; for (const cat of Object.keys(SEED)) { const m = SEED[cat].find(x=>x.id===id); if (m) return {...m, category:cat}; } }
 function rankOf(id, cat){
   const sorted = SEED[cat].map(m=>({id:m.id, p:state.points[m.id]||0})).sort((a,b)=>b.p-a.p);
   return sorted.findIndex(x=>x.id===id) + 1;
+}
+function roundLabel(b){
+  // round size 16->Round of 16, 8->QF, 4->SF, 2->Final
+  const size = b.rounds[b.current].length;
+  if (size >= 16) return 'Round of 16';
+  if (size === 8) return 'Round of 8';
+  if (size === 4) return 'Quarter Finals';
+  if (size === 2) return 'Final';
+  return 'Champion';
+}
+function totalMatches(b){
+  return b.rounds.slice(0,-1).reduce((sum,r)=>sum + r.filter(x=>x!=null).length/2, 0);
+}
+function matchesPlayed(b){
+  let played = 0;
+  for (let r=0; r<b.current; r++){
+    played += b.rounds[r].filter(x=>x!=null).length/2;
+  }
+  played += b.matchIdx;
+  return played;
 }
 
 // ---------- Views ----------
 let view = 'home';
 let rankFilter = 'all';
+let showBracket = false;
 
 function render(){
   const main = document.getElementById('main');
@@ -43,7 +113,6 @@ function render(){
 }
 
 function renderHome(){
-  const totalVotes = state.votes;
   const totalContenders = Object.values(SEED).flat().length;
   return `
     <section class="hero">
@@ -65,7 +134,7 @@ function renderHome(){
       </article>
     `).join('')}
     <div class="stats-grid">
-      <div class="stat"><div class="v">${totalVotes.toLocaleString()}</div><div class="l">Votes Cast</div></div>
+      <div class="stat"><div class="v">${state.votes.toLocaleString()}</div><div class="l">Votes Cast</div></div>
       <div class="stat"><div class="v">${Object.keys(SEED).length}</div><div class="l">Active Brackets</div></div>
       <div class="stat"><div class="v">${totalContenders}</div><div class="l">Combatants</div></div>
     </div>
@@ -74,23 +143,27 @@ function renderHome(){
 
 function renderBattle(){
   const cat = state.currentCat;
-  const queue = state.queues[cat];
-  const done = queue.length === 0;
-  const total = state.total[cat] || 1;
-  const progress = Math.min(100, (state.round[cat]-1) / total * 100);
+  const b = state.bracket[cat];
+  const total = totalMatches(b) || 1;
+  const played = matchesPlayed(b);
+  const progress = (played/total) * 100;
 
-  if (done){
-    const champ = findMeal(state.champion[cat]);
+  if (b.champion){
+    const champ = findMeal(b.champion);
     return `
       <div class="tourney-head">
         <p class="eyebrow">CURRENT TOURNAMENT</p>
-        <h2>${CAT_LABEL[cat]}<br/>Champion Crowned</h2>
-        <div class="round">Final · ${total}/${total}</div>
+        <h2>${CAT_LABEL[cat]}</h2>
+        <div class="round-row">
+          <span class="round">Champion Crowned · ${total}/${total}</span>
+          <button class="link" data-bracket>View Bracket</button>
+        </div>
         <div class="progress"><div class="bar" style="width:100%"></div></div>
       </div>
-      <article class="battle-card">
+      <div class="confetti">${'🎉🏆🎊✨🥇'.repeat(8).split('').map((e,i)=>`<span style="--i:${i};--d:${Math.random()*2}s">${e}</span>`).join('')}</div>
+      <article class="battle-card champion-card">
         <div class="img" style="background-image:url('${champ.img}')">
-          <span class="rank-pill">🏆 CHAMPION</span>
+          <span class="rank-pill">🏆 GRAND CHAMPION</span>
         </div>
         <div class="battle-body">
           <div class="battle-row">
@@ -101,26 +174,33 @@ function renderBattle(){
           <button class="vote-btn" data-reset>RESET BRACKET</button>
         </div>
       </article>
+      ${showBracket ? renderBracketOverlay(cat) : ''}
     `;
   }
 
-  const a = findMeal(state.champion[cat]);
-  const b = findMeal(queue[0]);
+  const r = b.rounds[b.current];
+  const i = b.matchIdx * 2;
+  const a = findMeal(r[i]);
+  const c = findMeal(r[i+1]);
   return `
     <div class="tourney-head">
       <p class="eyebrow">CURRENT TOURNAMENT</p>
       <h2>${CAT_LABEL[cat]}<br/>Showdown</h2>
-      <div class="round">Round ${state.round[cat]}/${total}</div>
+      <div class="round-row">
+        <span class="round">${roundLabel(b)} · ${played+1}/${total}</span>
+        <button class="link" data-bracket>View Bracket</button>
+      </div>
       <div class="progress"><div class="bar" style="width:${progress}%"></div></div>
     </div>
-    ${battleCard(a, 'left', false)}
+    <div id="cardA-wrap">${battleCard(a, 'left', false)}</div>
     <div class="vs-divider"><span>VS</span></div>
-    ${battleCard(b, 'right', true)}
+    <div id="cardB-wrap">${battleCard(c, 'right', true)}</div>
+    ${showBracket ? renderBracketOverlay(cat) : ''}
   `;
 }
 function battleCard(m, side, outline){
   return `
-    <article class="battle-card">
+    <article class="battle-card" data-id="${m.id}">
       <div class="img" style="background-image:url('${m.img}')">
         <span class="rank-pill ${side==='right'?'right':''}">RANK #${rankOf(m.id, m.category)}</span>
       </div>
@@ -133,6 +213,34 @@ function battleCard(m, side, outline){
         <button class="vote-btn ${outline?'outline':''}" data-vote="${m.id}">VOTE</button>
       </div>
     </article>
+  `;
+}
+
+function renderBracketOverlay(cat){
+  const b = state.bracket[cat];
+  return `
+    <div class="bracket-overlay" data-close-bracket>
+      <div class="bracket-sheet" onclick="event.stopPropagation()">
+        <div class="bracket-head">
+          <h3>${CAT_LABEL[cat]} · Bracket</h3>
+          <button class="icon-btn" data-close-bracket>✕</button>
+        </div>
+        <div class="bracket-scroll">
+          ${b.rounds.map((round, ri) => `
+            <div class="bracket-col">
+              <div class="bracket-col-label">${ri < b.rounds.length-1 ? `R${ri+1}` : 'WIN'}</div>
+              ${round.map((id, mi) => {
+                const m = findMeal(id);
+                const isCurrent = ri === b.current && Math.floor(mi/2) === b.matchIdx && !b.champion;
+                return `<div class="bracket-slot ${isCurrent?'live':''} ${id?'':'bye'}">
+                  ${m ? `<div class="bs-img" style="background-image:url('${m.img}')"></div><div class="bs-name">${m.name}</div>` : '<div class="bs-name muted">—</div>'}
+                </div>`;
+              }).join('')}
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -226,19 +334,17 @@ function wireView(){
   document.querySelectorAll('[data-cat]').forEach(el => el.onclick = () => {
     state.currentCat = el.dataset.cat; setView('battle');
   });
-  document.querySelectorAll('[data-vote]').forEach(el => el.onclick = () => {
+  document.querySelectorAll('[data-vote]').forEach(el => el.onclick = e => {
+    e.stopPropagation();
     const winner = el.dataset.vote;
     const cat = state.currentCat;
-    const a = state.champion[cat];
-    const b = state.queues[cat][0];
-    const loser = winner === a ? b : a;
-    state.points[winner] = (state.points[winner]||0) + 250;
-    state.points[loser] = (state.points[loser]||0) + 25;
-    state.votes++;
-    state.champion[cat] = winner;
-    state.queues[cat].shift();
-    state.round[cat]++;
-    save(); render();
+    // animate winner / loser cards
+    const wrapW = el.closest('[id^="cardA-wrap"], [id^="cardB-wrap"]');
+    const winCard = el.closest('.battle-card');
+    const otherWrap = wrapW && wrapW.id === 'cardA-wrap' ? document.getElementById('cardB-wrap') : document.getElementById('cardA-wrap');
+    if (winCard) winCard.classList.add('win-anim');
+    if (otherWrap) otherWrap.querySelector('.battle-card').classList.add('lose-anim');
+    setTimeout(() => { castVote(cat, winner); render(); }, 480);
   });
   document.querySelectorAll('[data-chip]').forEach(el => el.onclick = () => {
     rankFilter = el.dataset.chip; render();
@@ -248,14 +354,16 @@ function wireView(){
   if (reset) reset.onclick = () => {
     const cat = state.currentCat;
     SEED[cat].forEach(m => state.points[m.id] = 0);
-    state.queues[cat] = shuffle(SEED[cat].map(m => m.id));
-    state.champion[cat] = state.queues[cat].shift();
-    state.round[cat] = 1;
+    state.bracket[cat] = initBracket(cat);
     save(); render();
   };
+  const bb = document.querySelector('[data-bracket]');
+  if (bb) bb.onclick = () => { showBracket = true; render(); };
+  document.querySelectorAll('[data-close-bracket]').forEach(el => el.onclick = () => { showBracket = false; render(); });
 }
 function setView(v){
   view = v;
+  showBracket = false;
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.view===v));
   render();
 }
