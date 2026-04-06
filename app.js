@@ -134,6 +134,8 @@ let mapInstance = null;
 let mapSelectedId = null;
 let showAddDish = false;
 let addDishCat = 'mains';
+let showSearch = false;
+let searchQ = '';
 
 function render(){
   const main = document.getElementById('main');
@@ -142,6 +144,7 @@ function render(){
   else if (view==='battle') main.innerHTML = renderBattle();
   else if (view==='rank') main.innerHTML = renderRank();
   else if (view==='map') { main.innerHTML = renderMap(); mountMap(); }
+  if (showSearch) main.insertAdjacentHTML('beforeend', renderSearchSheet());
   wireView();
 }
 
@@ -249,6 +252,43 @@ function battleCard(m, side, outline){
         <button class="vote-btn ${outline?'outline':''}" data-vote="${m.id}">VOTE</button>
       </div>
     </article>
+  `;
+}
+
+function renderSearchSheet(){
+  const q = searchQ.trim().toLowerCase();
+  const all = Object.values(SEED).flat();
+  const results = q
+    ? all.filter(m =>
+        m.name.toLowerCase().includes(q) ||
+        m.restaurant.toLowerCase().includes(q) ||
+        m.city.toLowerCase().includes(q) ||
+        m.category.toLowerCase().includes(q))
+    : all;
+  return `
+    <div class="bracket-overlay" data-close-search>
+      <div class="bracket-sheet" onclick="event.stopPropagation()">
+        <div class="bracket-head">
+          <h3>Search the Arena</h3>
+          <button class="icon-btn" data-close-search>✕</button>
+        </div>
+        <input id="searchInput" class="search-input" placeholder="Dish, restaurant, city…" value="${q}" autofocus/>
+        <div class="search-results">
+          ${results.length===0 ? `<p class="form-hint">No matches.</p>` :
+            results.map(m => `
+              <div class="search-row" data-pick="${m.id}" data-cat="${m.category}">
+                <div class="thumb" style="background-image:url('${m.img}')"></div>
+                <div>
+                  <div class="name">${m.name}</div>
+                  <div class="sub">${m.restaurant} · ${m.city}</div>
+                </div>
+                <div class="pts">${pointsFor(m.id).toLocaleString()}</div>
+              </div>
+            `).join('')
+          }
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -468,6 +508,21 @@ function wireView(){
     mapSelectedId = null;
     setTimeout(render, 600);
   };
+  document.querySelectorAll('[data-close-search]').forEach(el => el.onclick = () => { showSearch = false; searchQ=''; render(); });
+  const si = document.getElementById('searchInput');
+  if (si){
+    si.focus();
+    si.oninput = e => {
+      searchQ = e.target.value;
+      // re-render only results list
+      const sheet = si.closest('.bracket-sheet');
+      const next = document.createElement('div');
+      next.innerHTML = renderSearchSheet();
+      sheet.querySelector('.search-results').replaceWith(next.querySelector('.search-results'));
+      wireSearchPicks();
+    };
+    wireSearchPicks();
+  }
   document.querySelectorAll('[data-add-dish]').forEach(el => el.onclick = () => { showAddDish = true; render(); });
   document.querySelectorAll('[data-close-add]').forEach(el => el.onclick = () => { showAddDish = false; render(); });
   const form = document.getElementById('addDishForm');
@@ -504,6 +559,16 @@ function wireView(){
   if (bb) bb.onclick = () => { showBracket = true; render(); };
   document.querySelectorAll('[data-close-bracket]').forEach(el => el.onclick = () => { showBracket = false; render(); });
 }
+function wireSearchPicks(){
+  document.querySelectorAll('[data-pick]').forEach(el => el.onclick = () => {
+    state.currentCat = el.dataset.cat;
+    mapSelectedId = el.dataset.pick;
+    showSearch = false; searchQ = '';
+    save();
+    setView('map');
+  });
+}
+
 function setView(v){
   view = v;
   showBracket = false;
@@ -511,6 +576,7 @@ function setView(v){
   render();
 }
 document.querySelectorAll('.nav-btn').forEach(b => b.onclick = () => setView(b.dataset.view));
+document.getElementById('topSearchBtn').onclick = () => { showSearch = true; render(); };
 
 render();
 bootSupabase();
