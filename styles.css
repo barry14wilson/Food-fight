@@ -187,10 +187,31 @@ main{flex:1;padding:18px 20px 100px;overflow-y:auto}
 
 /* ---------- MAP ---------- */
 .map-wrap{
-  border-radius:24px;overflow:hidden;height:520px;position:relative;
-  background:linear-gradient(160deg,#7BA77A,#5A8C6A 60%,#9AB57A);
-  margin:-4px -4px 0;
+  border-radius:24px;overflow:hidden;height:560px;position:relative;
+  background:#1a1a1a;margin:-4px -4px 0;
 }
+#leaflet-map{position:absolute;inset:0;background:#1a1a1a;z-index:0}
+.leaflet-container{font-family:'Inter',sans-serif;background:#1a1a1a}
+.map-controls{z-index:2}
+.food-pin-wrap{background:transparent!important;border:none!important}
+.food-pin{
+  width:56px;height:56px;border-radius:50%;background:#fff;
+  border:3px solid var(--primary);position:relative;
+  box-shadow:0 6px 16px rgba(0,0,0,.45);transition:transform .2s ease
+}
+.food-pin:hover{transform:scale(1.1)}
+.food-pin.top{border-color:var(--gold);box-shadow:0 8px 20px rgba(232,168,42,.55)}
+.food-pin.sel{transform:scale(1.18);border-color:var(--primary)}
+.food-pin .fp-img{
+  position:absolute;inset:3px;border-radius:50%;
+  background:#1a1a1a center/cover no-repeat
+}
+.food-pin .fp-rank{
+  position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);
+  background:var(--primary);color:#fff;font-family:'Archivo Black';font-size:10px;
+  padding:2px 8px;border-radius:999px;white-space:nowrap
+}
+.food-pin.top .fp-rank{background:var(--gold);color:#1a1a1a}
 .map-controls{position:absolute;top:14px;left:14px;right:14px;display:flex;justify-content:space-between}
 .cuisine-pill{
   background:rgba(255,255,255,.92);padding:10px 16px;border-radius:999px;

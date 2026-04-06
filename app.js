@@ -102,13 +102,16 @@ function matchesPlayed(b){
 let view = 'home';
 let rankFilter = 'all';
 let showBracket = false;
+let mapInstance = null;
+let mapSelectedId = null;
 
 function render(){
   const main = document.getElementById('main');
+  if (mapInstance && view !== 'map') { mapInstance.remove(); mapInstance = null; }
   if (view==='home') main.innerHTML = renderHome();
   else if (view==='battle') main.innerHTML = renderBattle();
   else if (view==='rank') main.innerHTML = renderRank();
-  else if (view==='map') main.innerHTML = renderMap();
+  else if (view==='map') { main.innerHTML = renderMap(); mountMap(); }
   wireView();
 }
 
@@ -299,34 +302,68 @@ function podium(m, ord, label, cls){
 
 function renderMap(){
   const all = Object.values(SEED).flat().map(m=>({...m,pts:state.points[m.id]||0})).sort((a,b)=>b.pts-a.pts);
-  const top = all[0];
+  const sel = (mapSelectedId && findMeal(mapSelectedId)) || all[0];
+  const selPts = state.points[sel.id] || 0;
   return `
     <div class="map-wrap">
+      <div id="leaflet-map"></div>
       <div class="map-controls">
         <div class="cuisine-pill"><span class="dot">≡</span> ALL CUISINES</div>
-        <div class="locate">📍</div>
-      </div>
-      <div class="heat-pin">🔥</div>
-      <div class="map-pin">
-        <div class="img" style="background-image:url('${top.img}')"></div>
-        <div class="lbl">#1 RANK</div>
+        <div class="locate" id="fitBtn" title="Fit all">📍</div>
       </div>
       <div class="map-card">
         <div class="banner">
-          <span class="top-tag">TOP DISH</span>
-          SIGNATURE · ${top.city.toUpperCase()}
+          <span class="top-tag">${sel.id===all[0].id?'TOP DISH':'SELECTED'}</span>
+          ${CAT_LABEL[sel.category||findMeal(sel.id).category].toUpperCase()} · ${sel.city.toUpperCase()}
         </div>
         <div class="row">
           <div>
-            <h4>${top.name}</h4>
-            <p class="sub">${top.restaurant} · 0.8 miles away</p>
-            <div class="pts">POINTS: ${top.pts.toLocaleString()}</div>
+            <h4>${sel.name}</h4>
+            <p class="sub">${sel.restaurant}</p>
+            <div class="pts">POINTS: ${selPts.toLocaleString()}</div>
           </div>
-          <div class="rating">★ ${top.rating.toFixed(1)}</div>
+          <div class="rating">★ ${sel.rating.toFixed(1)}</div>
         </div>
       </div>
     </div>
   `;
+}
+
+function mountMap(){
+  if (typeof L === 'undefined') { setTimeout(mountMap, 100); return; }
+  const el = document.getElementById('leaflet-map');
+  if (!el) return;
+  if (mapInstance) { mapInstance.remove(); mapInstance = null; }
+  mapInstance = L.map(el, { zoomControl:false, attributionControl:false }).setView([30, 10], 2);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19,
+  }).addTo(mapInstance);
+  const all = Object.values(SEED).flat().map(m => ({...m, pts: state.points[m.id]||0}));
+  const ranks = [...all].sort((a,b)=>b.pts-a.pts);
+  const topId = ranks[0].id;
+  const bounds = [];
+  all.forEach(m => {
+    const isTop = m.id === topId;
+    const isSel = m.id === mapSelectedId;
+    const rank = ranks.findIndex(x=>x.id===m.id) + 1;
+    const icon = L.divIcon({
+      className: 'food-pin-wrap',
+      html: `<div class="food-pin ${isTop?'top':''} ${isSel?'sel':''}">
+        <div class="fp-img" style="background-image:url('${m.img}')"></div>
+        <div class="fp-rank">#${rank}</div>
+      </div>`,
+      iconSize: [56, 72],
+      iconAnchor: [28, 72],
+    });
+    const marker = L.marker([m.lat, m.lng], { icon }).addTo(mapInstance);
+    marker.on('click', () => {
+      mapSelectedId = m.id;
+      render();
+      setTimeout(() => mapInstance && mapInstance.flyTo([m.lat, m.lng], 5, { duration: .8 }), 50);
+    });
+    bounds.push([m.lat, m.lng]);
+  });
+  if (bounds.length) mapInstance.fitBounds(bounds, { padding: [40, 40] });
 }
 
 // ---------- Wiring ----------
@@ -356,6 +393,14 @@ function wireView(){
     SEED[cat].forEach(m => state.points[m.id] = 0);
     state.bracket[cat] = initBracket(cat);
     save(); render();
+  };
+  const fit = document.getElementById('fitBtn');
+  if (fit) fit.onclick = () => {
+    if (!mapInstance) return;
+    const all = Object.values(SEED).flat();
+    mapInstance.flyToBounds(all.map(m=>[m.lat,m.lng]), { padding:[40,40], duration:.6 });
+    mapSelectedId = null;
+    setTimeout(render, 600);
   };
   const bb = document.querySelector('[data-bracket]');
   if (bb) bb.onclick = () => { showBracket = true; render(); };
