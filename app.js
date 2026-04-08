@@ -10,6 +10,9 @@ const ROUND_NAMES = ['Round of 16','Quarter Finals','Semi Finals','Final','Champ
 
 let state = load() || init();
 let globalPoints = {}; // from Supabase
+let myVoteCount = 0;
+let isBooting = true;
+let pollTimer = null;
 
 function init(){
   const s = { points:{}, votes:0, currentCat:'mains', bracket:{} };
@@ -22,24 +25,65 @@ function init(){
 
 async function bootSupabase(){
   try {
-    const [dishes, points] = await Promise.all([SB.fetchDishes(), SB.fetchPoints()]);
+    const [dishes, points, myVotes] = await Promise.all([
+      SB.fetchDishes(), SB.fetchPoints(), SB.fetchMyVoteCount().catch(()=>0)
+    ]);
     if (dishes && dishes.length){
       const cats = { mains:[], starters:[], desserts:[] };
       dishes.forEach(d => { if (cats[d.category]) cats[d.category].push(d); });
-      // Only swap in if we got data for all categories
       if (cats.mains.length && cats.starters.length && cats.desserts.length){
         window.SEED = cats;
       }
     }
+    globalPoints = {};
     if (points) points.forEach(p => globalPoints[p.id] = p.points);
-    // Re-init brackets if seed changed and storage was empty
+    myVoteCount = myVotes || 0;
     if (!localStorage.getItem(STORAGE_KEY)){
       state = init(); save();
     }
+    isBooting = false;
     render();
+    startPolling();
   } catch(e){
     console.warn('Supabase boot failed, using local seed', e);
+    isBooting = false;
+    toast('Offline mode — using local data', 'warn');
+    render();
   }
+}
+
+async function refreshPoints(){
+  try {
+    const points = await SB.fetchPoints();
+    const next = {};
+    if (points) points.forEach(p => next[p.id] = p.points);
+    const changed = JSON.stringify(next) !== JSON.stringify(globalPoints);
+    globalPoints = next;
+    if (changed) render();
+  } catch(e){ /* ignore */ }
+}
+function startPolling(){
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') refreshPoints();
+  }, 15000);
+}
+
+// Toast
+function toast(msg, kind='ok'){
+  let wrap = document.getElementById('toastWrap');
+  if (!wrap){
+    wrap = document.createElement('div');
+    wrap.id = 'toastWrap';
+    wrap.className = 'toast-wrap';
+    document.body.appendChild(wrap);
+  }
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => el.classList.add('out'), 2200);
+  setTimeout(() => el.remove(), 2700);
 }
 function pointsFor(id){ return (globalPoints[id] || 0) + (state.points[id] || 0); }
 function nextPow2(n){ let p=1; while(p<n) p*=2; return p; }
@@ -88,13 +132,15 @@ function castVote(cat, winnerId){
   globalPoints[winnerId] = (globalPoints[winnerId]||0) + 250;
   globalPoints[loserId]  = (globalPoints[loserId]||0)  + 25;
   state.votes++;
+  myVoteCount++;
   b.rounds[b.current+1][b.matchIdx] = winnerId;
   b.matchIdx++;
   autoAdvance(b);
   save();
   // Write to Supabase (fire & forget)
   if (window.SB) SB.castVote({ winner_id: winnerId, loser_id: loserId, category: cat })
-    .catch(e => console.warn('vote sync failed', e));
+    .then(r => { if (!r.ok) toast('Vote not synced', 'warn'); })
+    .catch(() => toast('Vote not synced', 'warn'));
 }
 
 function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -149,6 +195,7 @@ function render(){
 }
 
 function renderHome(){
+  if (isBooting) return renderSkeleton();
   const totalContenders = Object.values(SEED).flat().length;
   return `
     <section class="hero">
@@ -173,10 +220,19 @@ function renderHome(){
       </article>
     `).join('')}
     <div class="stats-grid">
-      <div class="stat"><div class="v">${state.votes.toLocaleString()}</div><div class="l">Votes Cast</div></div>
+      <div class="stat"><div class="v">${myVoteCount.toLocaleString()}</div><div class="l">Your Votes</div></div>
       <div class="stat"><div class="v">${Object.keys(SEED).length}</div><div class="l">Active Brackets</div></div>
       <div class="stat"><div class="v">${totalContenders}</div><div class="l">Combatants</div></div>
     </div>
+  `;
+}
+
+function renderSkeleton(){
+  return `
+    <div class="skeleton hero-sk"></div>
+    <div class="skeleton card-sk"></div>
+    <div class="skeleton card-sk"></div>
+    <div class="skeleton card-sk"></div>
   `;
 }
 
@@ -541,18 +597,21 @@ function wireView(){
       img: fd.get('img'),
     };
     addDishCat = dish.category;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true; submitBtn.textContent = 'SUBMITTING…';
     try {
       const r = await SB.addDish(dish);
       if (!r.ok) throw new Error(await r.text());
-      // Add locally + refresh bracket of this category
       SEED[dish.category].push(dish);
       state.bracket[dish.category] = initBracket(dish.category);
       save();
       showAddDish = false;
       state.currentCat = dish.category;
+      toast(`${dish.name} added to the arena`);
       setView('battle');
     } catch(err){
-      alert('Failed to add dish: ' + err.message);
+      submitBtn.disabled = false; submitBtn.textContent = 'SUBMIT TO ARENA';
+      toast('Failed to add dish', 'err');
     }
   };
   const bb = document.querySelector('[data-bracket]');

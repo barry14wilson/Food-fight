@@ -88,6 +88,32 @@ main{flex:1;padding:18px 20px 100px;overflow-y:auto}
 .search-row .sub{font-size:11px;color:var(--muted)}
 .search-row .pts{color:var(--primary);font-weight:800;font-size:12px}
 
+/* Skeleton loading */
+@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+.skeleton{
+  background:linear-gradient(90deg,#EEE6DC 0%,#F8F1E8 50%,#EEE6DC 100%);
+  background-size:200% 100%;animation:shimmer 1.4s ease infinite;
+  border-radius:22px;margin-bottom:16px
+}
+.hero-sk{height:180px;border-radius:24px}
+.card-sk{height:220px}
+
+/* Toast */
+.toast-wrap{
+  position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:100;
+  display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none
+}
+.toast{
+  background:var(--ink);color:#fff;padding:12px 20px;border-radius:999px;
+  font-size:13px;font-weight:600;box-shadow:0 10px 30px rgba(0,0,0,.25);
+  animation:toastIn .25s ease;max-width:90vw
+}
+.toast.warn{background:#D68A1F}
+.toast.err{background:#C92A2A}
+.toast.out{animation:toastOut .4s ease forwards}
+@keyframes toastIn{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastOut{to{opacity:0;transform:translateY(-12px)}}
+
 .cat-card{
   background:var(--surface);border-radius:22px;overflow:hidden;
   box-shadow:var(--shadow);margin-bottom:16px;border:1px solid var(--outline);

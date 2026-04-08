@@ -29,6 +29,13 @@ window.SB = {
     if (!r.ok) return [];
     return r.json();
   },
+  async fetchMyVoteCount(){
+    const r = await fetch(`${SB_URL}/rest/v1/ff_votes?select=id&voter_id=eq.${encodeURIComponent(VOTER_ID)}`, {
+      headers: { ...headers, Prefer: 'count=exact' }
+    });
+    const range = r.headers.get('content-range') || '*/0';
+    return parseInt(range.split('/')[1] || '0', 10);
+  },
   async castVote({ winner_id, loser_id, category }){
     return fetch(`${SB_URL}/rest/v1/ff_votes`, {
       method: 'POST',
