@@ -25,6 +25,19 @@ function init(){
 
 async function bootSupabase(){
   try {
+    // Hydrate current user first so getVoterId() is correct
+    window.ffUser = await SB.getCurrentUser().catch(()=>null);
+    SB.onAuthChange(async user => {
+      const wasUser = !!window.ffUser;
+      window.ffUser = user;
+      updateAvatar();
+      // Refresh vote count for the new identity
+      myVoteCount = await SB.fetchMyVoteCount().catch(()=>0);
+      if (user && !wasUser) toast(`Signed in as ${user.email || 'user'}`);
+      render();
+    });
+    updateAvatar();
+
     const [dishes, points, myVotes] = await Promise.all([
       SB.fetchDishes(), SB.fetchPoints(), SB.fetchMyVoteCount().catch(()=>0)
     ]);
@@ -67,6 +80,30 @@ function startPolling(){
   pollTimer = setInterval(() => {
     if (document.visibilityState === 'visible') refreshPoints();
   }, 15000);
+}
+
+function updateAvatar(){
+  const av = document.querySelector('.topbar .avatar');
+  if (!av) return;
+  if (window.ffUser){
+    const meta = window.ffUser.user_metadata || {};
+    const pic = meta.avatar_url || meta.picture;
+    if (pic){
+      av.style.backgroundImage = `url('${pic}')`;
+      av.style.backgroundSize = 'cover';
+      av.textContent = '';
+    } else {
+      const initial = (meta.full_name || window.ffUser.email || '?')[0].toUpperCase();
+      av.style.backgroundImage = '';
+      av.textContent = initial;
+      av.style.fontFamily = "'Archivo Black'";
+    }
+    av.classList.add('signed-in');
+  } else {
+    av.style.backgroundImage = '';
+    av.textContent = '🧑‍🍳';
+    av.classList.remove('signed-in');
+  }
 }
 
 // Toast
@@ -182,6 +219,12 @@ let showAddDish = false;
 let addDishCat = 'mains';
 let showSearch = false;
 let searchQ = '';
+let showAccount = false;
+let showHistory = false;
+let historyRows = null;
+let historyLoading = false;
+let placeResults = [];
+let placeSearchTimer = null;
 
 function render(){
   const main = document.getElementById('main');
@@ -205,8 +248,9 @@ function renderHome(){
       <div class="hero-actions">
         <button class="cta" data-go="battle">View Brackets</button>
         <button class="cta ghost" data-add-dish>+ Add Dish</button>
+        <button class="cta ghost" data-history>History</button>
       </div>
-    </section>${showAddDish ? renderAddDishSheet() : ''}
+    </section>${showAddDish ? renderAddDishSheet() : ''}${showHistory ? renderHistorySheet() : ''}${showAccount ? renderAccountSheet() : ''}
     ${Object.keys(SEED).map(cat => `
       <article class="cat-card" data-cat="${cat}">
         <div class="cat-img" style="background-image:url('${SEED[cat][0].img}')">
@@ -348,6 +392,73 @@ function renderSearchSheet(){
   `;
 }
 
+function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function renderAccountSheet(){
+  const u = window.ffUser;
+  return `
+    <div class="bracket-overlay" data-close-account>
+      <div class="bracket-sheet" onclick="event.stopPropagation()">
+        <div class="bracket-head">
+          <h3>${u ? 'Your Account' : 'Sign in'}</h3>
+          <button class="icon-btn" data-close-account>✕</button>
+        </div>
+        ${u ? `
+          <div class="account-box">
+            <div class="account-avatar">${u.user_metadata && u.user_metadata.avatar_url ? `<img src="${u.user_metadata.avatar_url}"/>` : (u.email||'?')[0].toUpperCase()}</div>
+            <div class="account-name">${escapeHTML((u.user_metadata && u.user_metadata.full_name) || u.email || 'Signed in')}</div>
+            <div class="account-sub">${escapeHTML(u.email || '')}</div>
+            <div class="account-stats">
+              <div><strong>${myVoteCount}</strong><span>Votes cast</span></div>
+            </div>
+            <button class="vote-btn outline" data-signout>SIGN OUT</button>
+          </div>
+        ` : `
+          <p class="form-hint" style="margin:0 0 14px">Sign in to sync your votes across devices and track your history.</p>
+          <button class="vote-btn google-btn" data-google><span class="g">G</span> Continue with Google</button>
+          <div class="divider"><span>or</span></div>
+          <form id="magicForm" class="add-form">
+            <label>Email<input name="email" type="email" required placeholder="you@example.com"/></label>
+            <button type="submit" class="vote-btn outline">Send magic link</button>
+          </form>
+          <p class="form-hint">Google requires OAuth provider config in Supabase → Auth → Providers. Email magic link works out-of-the-box.</p>
+        `}
+      </div>
+    </div>
+  `;
+}
+
+function renderHistorySheet(){
+  return `
+    <div class="bracket-overlay" data-close-history>
+      <div class="bracket-sheet" onclick="event.stopPropagation()">
+        <div class="bracket-head">
+          <h3>Your History</h3>
+          <button class="icon-btn" data-close-history>✕</button>
+        </div>
+        ${historyLoading ? '<div class="skeleton card-sk" style="height:60px"></div>'.repeat(5)
+          : (historyRows && historyRows.length
+            ? `<div class="history-list">${historyRows.map(renderHistoryRow).join('')}</div>`
+            : `<p class="form-hint">No votes yet. Head to the Battle arena to cast your first vote.</p>`)}
+      </div>
+    </div>
+  `;
+}
+function renderHistoryRow(v){
+  const w = v.winner || {}, l = v.loser || {};
+  const when = new Date(v.created_at).toLocaleString();
+  return `
+    <div class="history-row">
+      <div class="h-thumb win" style="background-image:url('${w.img||''}')"></div>
+      <div class="h-body">
+        <div class="h-line"><span class="h-badge">WON</span>${escapeHTML(w.name||'—')}</div>
+        <div class="h-line muted">beat ${escapeHTML(l.name||'—')}</div>
+        <div class="h-date">${when}</div>
+      </div>
+    </div>
+  `;
+}
+
 function renderAddDishSheet(){
   return `
     <div class="bracket-overlay" data-close-add>
@@ -358,6 +469,15 @@ function renderAddDishSheet(){
         </div>
         <form id="addDishForm" class="add-form">
           <label>Dish name<input name="name" required placeholder="e.g. Truffle Risotto"/></label>
+          <label>Find restaurant (powered by OpenStreetMap)
+            <input id="placeSearch" placeholder="Search: Hawksmoor London" autocomplete="off"/>
+          </label>
+          <div id="placeResults" class="place-results ${placeResults.length?'':'hidden'}">
+            ${placeResults.map((p,i) => `<div class="place-row" data-place="${i}">
+              <div class="pn">${escapeHTML(p.display_name.split(',').slice(0,2).join(', '))}</div>
+              <div class="ps">${escapeHTML(p.display_name)}</div>
+            </div>`).join('')}
+          </div>
           <label>Restaurant<input name="restaurant" required placeholder="e.g. Locanda Locatelli"/></label>
           <label>City<input name="city" required placeholder="e.g. London"/></label>
           <label>Category
@@ -580,7 +700,64 @@ function wireView(){
     wireSearchPicks();
   }
   document.querySelectorAll('[data-add-dish]').forEach(el => el.onclick = () => { showAddDish = true; render(); });
-  document.querySelectorAll('[data-close-add]').forEach(el => el.onclick = () => { showAddDish = false; render(); });
+  document.querySelectorAll('[data-close-add]').forEach(el => el.onclick = () => { showAddDish = false; placeResults=[]; render(); });
+
+  document.querySelectorAll('[data-history]').forEach(el => el.onclick = async () => {
+    showHistory = true; historyLoading = true; historyRows = null; render();
+    try { historyRows = await SB.fetchMyHistory(20); }
+    catch(e) { historyRows = []; toast('Failed to load history','err'); }
+    historyLoading = false; render();
+  });
+  document.querySelectorAll('[data-close-history]').forEach(el => el.onclick = () => { showHistory = false; render(); });
+
+  document.querySelectorAll('[data-close-account]').forEach(el => el.onclick = () => { showAccount = false; render(); });
+  const gBtn = document.querySelector('[data-google]');
+  if (gBtn) gBtn.onclick = async () => {
+    try { await SB.signInWithGoogle(); }
+    catch(e){ toast('Google login not configured','err'); }
+  };
+  const so = document.querySelector('[data-signout]');
+  if (so) so.onclick = async () => { await SB.signOut(); showAccount = false; toast('Signed out'); };
+  const mf = document.getElementById('magicForm');
+  if (mf) mf.onsubmit = async e => {
+    e.preventDefault();
+    const email = new FormData(mf).get('email');
+    try { await SB.signInWithEmail(email); toast('Magic link sent — check your email'); }
+    catch(err){ toast('Failed to send magic link','err'); }
+  };
+
+  // Nominatim place autofill
+  const ps = document.getElementById('placeSearch');
+  if (ps){
+    ps.oninput = e => {
+      const q = e.target.value;
+      clearTimeout(placeSearchTimer);
+      placeSearchTimer = setTimeout(async () => {
+        placeResults = await SB.searchPlaces(q).catch(()=>[]);
+        // Re-render just the results list in-place
+        const list = document.getElementById('placeResults');
+        if (!list) return;
+        list.classList.toggle('hidden', !placeResults.length);
+        list.innerHTML = placeResults.map((p,i) => `<div class="place-row" data-place="${i}">
+          <div class="pn">${escapeHTML(p.display_name.split(',').slice(0,2).join(', '))}</div>
+          <div class="ps">${escapeHTML(p.display_name)}</div>
+        </div>`).join('');
+        list.querySelectorAll('[data-place]').forEach(row => row.onclick = () => {
+          const p = placeResults[parseInt(row.dataset.place,10)];
+          const form = document.getElementById('addDishForm');
+          if (!form || !p) return;
+          const parts = p.display_name.split(',').map(s=>s.trim());
+          form.restaurant.value = parts[0] || '';
+          form.city.value = (p.address && (p.address.city || p.address.town || p.address.village || p.address.suburb)) || parts[1] || '';
+          form.lat.value = p.lat;
+          form.lng.value = p.lon;
+          placeResults = [];
+          list.classList.add('hidden');
+          list.innerHTML = '';
+        });
+      }, 400);
+    };
+  }
   const form = document.getElementById('addDishForm');
   if (form) form.onsubmit = async e => {
     e.preventDefault();
@@ -636,6 +813,8 @@ function setView(v){
 }
 document.querySelectorAll('.nav-btn').forEach(b => b.onclick = () => setView(b.dataset.view));
 document.getElementById('topSearchBtn').onclick = () => { showSearch = true; render(); };
+document.querySelector('.topbar .avatar').onclick = () => { showAccount = true; render(); };
+document.querySelector('.topbar .avatar').style.cursor = 'pointer';
 
 render();
 bootSupabase();
